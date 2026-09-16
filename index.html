@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cricket Championship</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+
+    body {
+      background: radial-gradient(circle at top, #0f172a, #020617);
+      color: #ffffff;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 10px;
+    }
+
+    .game-card {
+      background: rgba(30, 41, 59, 0.85);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 20px;
+      padding: 15px;
+      width: 100%;
+      max-width: 360px;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
+      text-align: center;
+    }
+
+    .scoreboard {
+      display: flex;
+      justify-content: space-around;
+      background: #090d16;
+      border-radius: 12px;
+      padding: 10px;
+      margin-bottom: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .score-item span {
+      display: block;
+      font-size: 11px;
+      color: #94a3b8;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+
+    .score-item strong {
+      font-size: 20px;
+      color: #38bdf8;
+    }
+
+    #canvas-container {
+      position: relative;
+      width: 320px;
+      height: 380px;
+      margin: 0 auto;
+      border-radius: 14px;
+      overflow: hidden;
+      border: 2px solid #334155;
+    }
+
+    canvas {
+      background: #1e3a1e;
+      display: block;
+    }
+
+    .commentary {
+      margin-top: 12px;
+      height: 24px;
+      font-size: 15px;
+      font-weight: bold;
+      color: #facc15;
+    }
+
+    .controls {
+      margin-top: 15px;
+      display: flex;
+      gap: 10px;
+    }
+
+    .btn {
+      flex: 1;
+      padding: 14px;
+      border: none;
+      border-radius: 12px;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: transform 0.1s ease;
+    }
+
+    .btn:active {
+      transform: scale(0.96);
+    }
+
+    #bat-btn {
+      background: linear-gradient(135deg, #22c55e, #16a34a);
+      color: #ffffff;
+      box-shadow: 0 4px 15px rgba(34, 197, 94, 0.4);
+    }
+
+    #reset-btn {
+      background: #334155;
+      color: #cbd5e1;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="game-card">
+    <div class="scoreboard">
+      <div class="score-item">
+        <span>Score</span>
+        <strong id="display-score">0 / 0</strong>
+      </div>
+      <div class="score-item">
+        <span>Overs</span>
+        <strong id="display-overs">0.0 / 2.0</strong>
+      </div>
+      <div class="score-item">
+        <span>Target</span>
+        <strong id="display-target">28</strong>
+      </div>
+    </div>
+
+    <div id="canvas-container">
+      <canvas id="gameCanvas" width="320" height="380"></canvas>
+    </div>
+
+    <div class="commentary" id="commentary-text">Tap Swing to Hit!</div>
+
+    <div class="controls">
+      <button class="btn" id="bat-btn" onclick="swingBat()">SWING BAT</button>
+      <button class="btn" id="reset-btn" onclick="restartMatch()">Restart</button>
+    </div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+
+    const scoreDisplay = document.getElementById("display-score");
+    const oversDisplay = document.getElementById("display-overs");
+    const targetDisplay = document.getElementById("display-target");
+    const commentary = document.getElementById("commentary-text");
+
+    let target = 28;
+    let runs = 0;
+    let wickets = 0;
+    let maxWickets = 2;
+    let balls = 0;
+    const maxBalls = 12;
+    let gameActive = true;
+
+    // Pitch Dimensions
+    const pitch = { x: 100, y: 0, width: 120, height: 380 };
+
+    // Ball Status
+    let ball = {
+      x: 160,
+      y: 40,
+      radius: 6,
+      vy: 4.8,
+      vx: 0,
+      active: false,
+      hit: false
+    };
+
+    // Batsman Status
+    let bat = {
+      angle: 0,
+      swinging: false,
+      swingProgress: 0
+    };
+
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+    function playTone(freq, duration, type = 'sine') {
+      try {
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + duration);
+      } catch (e) {}
+    }
+
+    function bowl() {
+      if (!gameActive) return;
+      ball.x = 150 + (Math.random() * 20 - 10);
+      ball.y = 40;
+      ball.vy = 4.5 + Math.random() * 2;
+      ball.vx = (Math.random() - 0.5) * 0.8;
+      ball.active = true;
+      ball.hit = false;
+      commentary.textContent = "Ball is coming...";
+      commentary.style.color = "#38bdf8";
+    }
+
+    function swingBat() {
+      if (!gameActive || bat.swinging) return;
+      bat.swinging = true;
+      bat.swingProgress = 0;
+
+      // Contact Check
+      if (ball.active && !ball.hit && ball.y >= 290 && ball.y <= 340) {
+        processShot();
+      }
+    }
+
+    function processShot() {
+      ball.hit = true;
+      const timingDiff = Math.abs(ball.y - 315);
+      let shotRun = 0;
+
+      if (timingDiff < 8) {
+        shotRun = 6;
+        commentary.textContent = "MASSIVE SIX! (6 Runs)";
+        commentary.style.color = "#4ade80";
+        playTone(600, 0.2, 'triangle');
+      } else if (timingDiff < 16) {
+        shotRun = 4;
+        commentary.textContent = "BEAUTIFUL FOUR! (4 Runs)";
+        commentary.style.color = "#38bdf8";
+        playTone(500, 0.15, 'triangle');
+      } else if (timingDiff < 24) {
+        shotRun = Math.random() > 0.5 ? 2 : 1;
+        commentary.textContent = `${shotRun} Run(s) taken!`;
+        commentary.style.color = "#facc15";
+        playTone(400, 0.1, 'sine');
+      } else {
+        wickets++;
+        commentary.textContent = "OUT! Caught in the deep!";
+        commentary.style.color = "#f43f5e";
+        playTone(180, 0.35, 'sawtooth');
+      }
+
+      runs += shotRun;
+      ball.vy = -7;
+      ball.vx = (Math.random() - 0.5) * 6;
+      endDelivery();
+    }
+
+    function endDelivery() {
+      balls++;
+      updateDashboard();
+
+      if (runs >= target) {
+        gameActive = false;
+        commentary.textContent = "YOU WON THE MATCH!";
+        commentary.style.color = "#22c55e";
+        return;
+      }
+
+      if (wickets >= maxWickets) {
+        gameActive = false;
+        commentary.textContent = "ALL OUT! Match Lost!";
+        commentary.style.color = "#f43f5e";
+        return;
+      }
+
+      if (balls >= maxBalls) {
+        gameActive = false;
+        commentary.textContent = "OVERS COMPLETE! Match Lost!";
+        commentary.style.color = "#f43f5e";
+        return;
+      }
+
+      setTimeout(() => {
+        if (gameActive) bowl();
+      }, 1600);
+    }
+
+    function updateDashboard() {
+      scoreDisplay.textContent = `${runs} / ${wickets}`;
+      const overNum = Math.floor(balls / 6);
+      const ballNum = balls % 6;
+      oversDisplay.textContent = `${overNum}.${ballNum} / 2.0`;
+      targetDisplay.textContent = target;
+    }
+
+    function updatePhysics() {
+      if (bat.swinging) {
+        bat.swingProgress += 0.25;
+        bat.angle = Math.sin(bat.swingProgress) * 1.5;
+        if (bat.swingProgress >= Math.PI) {
+          bat.swinging = false;
+          bat.angle = 0;
+        }
+      }
+
+      if (ball.active) {
+        ball.y += ball.vy;
+        ball.x += ball.vx;
+
+        // Missed Ball Check
+        if (!ball.hit && ball.y > 350) {
+          ball.active = false;
+          // Clean Bowled check
+          if (Math.abs(ball.x - 160) < 18) {
+            wickets++;
+            commentary.textContent = "BOWLED! Smashed Stumps!";
+            commentary.style.color = "#f43f5e";
+            playTone(150, 0.4, 'sawtooth');
+          } else {
+            commentary.textContent = "Dot Ball! Swing and a miss!";
+            commentary.style.color = "#94a3b8";
+            playTone(250, 0.08, 'sine');
+          }
+          endDelivery();
+        }
+
+        if (ball.y < -20 || ball.x < 0 || ball.x > canvas.width) {
+          ball.active = false;
+        }
+      }
+    }
+
+    function renderGame() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Pitch
+      ctx.fillStyle = "#a1744b";
+      ctx.fillRect(pitch.x, pitch.y, pitch.width, pitch.height);
+
+      // Crease Lines
+      ctx.strokeStyle = "rgba(255,255,255,0.7)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(pitch.x, 320);
+      ctx.lineTo(pitch.x + pitch.width, 320);
+      ctx.stroke();
+
+      // Stumps (Bottom)
+      ctx.fillStyle = "#ffffff";
+      for (let i = -1; i <= 1; i++) {
+        ctx.fillRect(160 + (i * 7) - 2, 332, 4, 16);
+      }
+
+      // Stumps (Top)
+      for (let i = -1; i <= 1; i++) {
+        ctx.fillRect(160 + (i * 7) - 2, 20, 4, 16);
+      }
+
+      // Draw Ball
+      if (ball.active) {
+        ctx.fillStyle = "#ef4444";
+        ctx.beginPath();
+        ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+
+      // Draw Batsman & Bat
+      ctx.save();
+      ctx.translate(160, 310);
+      ctx.rotate(bat.angle);
+
+      // Bat
+      ctx.fillStyle = "#f59e0b";
+      ctx.fillRect(-4, -5, 8, 30);
+      ctx.fillStyle = "#78350f";
+      ctx.fillRect(-2, 25, 4, 10);
+
+      // Hands
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.arc(0, 25, 4, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.restore();
+    }
+
+    function gameLoop() {
+      updatePhysics();
+      renderGame();
+      requestAnimationFrame(gameLoop);
+    }
+
+    function restartMatch() {
+      runs = 0;
+      wickets = 0;
+      balls = 0;
+      gameActive = true;
+      ball.active = false;
+      updateDashboard();
+      commentary.textContent = "New Match! Tap Swing to play.";
+      commentary.style.color = "#38bdf8";
+      setTimeout(bowl, 800);
+    }
+
+    canvas.addEventListener('click', swingBat);
+
+    // Initial Start
+    updateDashboard();
+    gameLoop();
+    setTimeout(bowl, 1000);
+  </script>
+</body>
+</html>
+
